@@ -4,7 +4,9 @@ const bodyParser = require('body-parser')
 const ejs = require('ejs')
 const mongoose = require('mongoose')
 //const encrypt = require('mongoose-encryption')
-const md5 = require('md5')
+//const md5 = require('md5')
+const bcrypt = require('bcrypt')
+const saltRounds = 10
 
 const app = express()
 app.use(express.static('public'))
@@ -35,18 +37,27 @@ app.route('/login')
     res.render('login')
 })
 .post((req, res)=>{
+    
     username = req.body.username
-    password = md5(req.body.password)
+    password = req.body.password
 
     User.findOne({email: username}, (err, result)=>{
+
         if(!err){
+            // Load hash from your password DB.
             if(result){
-                if(result.password === password){
-                    res.render('secrets')
-                } else{
-                    res.send("Password Incorrect!!!!!!")
-                }
-            }
+                bcrypt.compare(password, result.password, function(err, hashResult) {
+                    //this fn automatically converts password to its corresponding hash.
+                    // result == true
+                    if(hashResult){
+                        res.render('secrets')
+                    } else{
+                        res.send("Invalid Password")
+                    }
+                }) 
+            }  else{
+                res.send("User does not exist.")
+            } 
         } else{
             console.log(err)
         }
@@ -58,13 +69,19 @@ app.route('/register')
     res.render('register')
 })
 .post((req, res)=>{
-    const registrer = new User({
-        email: req.body.username,
-        password: md5(req.body.password)
-        //md5() is used for hashing our pwd.
-    })
-    registrer.save()
-    res.redirect('/login')
+
+    bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
+        // Store hash in your password DB.
+        const registrer = new User({
+            email: req.body.username,
+            password: hash
+            
+        })
+        registrer.save()
+        res.redirect('/login')
+    });
+
+
 })
 
 
