@@ -11,6 +11,10 @@ const passport = require('passport')
 const passportLocalMongoose = require('passport-local-mongoose')
 const session = require('express-session')
 const connectEnsureLogin = require('connect-ensure-login');// authorization
+const GoogleStrategy = require('passport-google-oauth20').Strategy;//check - https://www.passportjs.org/packages/passport-google-oauth20/
+const FacebookStrategy = require('passport-facebook').Strategy;
+const findOrCreate = require("mongoose-findorcreate");
+
 
 const app = express()
 app.use(express.static('public'))
@@ -20,9 +24,14 @@ mongoose.connect('mongodb://localhost:27017/userDB', {useNewUrlParser: true, use
 
 const userSchema = new mongoose.Schema({
     email: String,
-    password: String
+    password: String,
+    googleId: String,
+    facebookId: String,
+    secret: String
 })
 userSchema.plugin(passportLocalMongoose)
+userSchema.plugin(findOrCreate)
+
 //Encryption keys in .env
 
 //it is important to add thid plugin above part1 bcoz in part1 we are paSSing userSchema to User model.
@@ -53,6 +62,34 @@ app.use(session({
     done(null, user);
   });
 
+  //check - https://www.passportjs.org/packages/passport-google-oauth20/
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_OAUTH_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+    callbackURL: "http://localhost:3000/auth/google/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+      console.log(profile)
+      //from findOrCreate package.i.e findOrCreate() is not a mongoose/mongoDB method
+    User.findOrCreate({ googleId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
+//check - 
+passport.use(new FacebookStrategy({
+    clientID: process.env.CLIENT_ID_FB,
+    clientSecret: process.env.CLIENT_SECRET_FB,
+    callbackURL: "http://localhost:3000/auth/facebook/secrets"
+  },
+  function(accessToken, refreshToken, profile, cb) {
+    User.findOrCreate({ facebookId: profile.id }, function (err, user) {
+      return cb(err, user);
+    });
+  }
+));
+
 app.get('/', (req, res)=>{
     res.render('home')
 })
@@ -61,6 +98,29 @@ app.get('/logout', (req, res)=>{
     req.logout()
     res.redirect('/')
 })
+
+app.get('/auth/google',
+  passport.authenticate('google', { scope: ['profile'] }));
+
+//callbackURL: "http://localhost:3000/auth/google/secrets". This URL is which we provided
+//on google developer console(google developer console is a webpage where we provide our app's details for using google as authentication for login, this page also contains complete details of google APis for developers. )
+//which means when google authentication is successful, it redirects to this route.
+  app.get('/auth/google/secrets', 
+  passport.authenticate('google', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect here.
+    res.redirect('/secrets');
+  })
+
+  app.get('/auth/facebook',
+  passport.authenticate('facebook'));
+
+app.get('/auth/facebook/secrets',
+  passport.authenticate('facebook', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    res.redirect('/secrets');
+  });
 
 // app.route('/secrets')
 // .get((req, res)=>{
@@ -74,9 +134,40 @@ app.get('/logout', (req, res)=>{
 
 //This codes are not from Angela Yu.Two days gone on above secrets route.
 //This code i from https://heynode.com/tutorial/authenticate-users-node-expressjs-and-passportjs/
-app.get('/secrets', connectEnsureLogin.ensureLoggedIn(), (req, res) => {
-    res.render('secrets')
+//This get() only allows authenticated users to see the secrets.
+// app.get('/secrets', connectEnsureLogin.ensureLoggedIn(), (req, res) => {
+//     res.render('secrets')
+//   });
+
+//Now all users can see the written secrets, but cant see who written
+app.get('/secrets', (req, res)=>{
+    User.find({'secret': {$ne: null}}, (err, foundUsers)=>{
+        res.render('secrets', {usersWithSecrets: foundUsers})
+    })
+    
+})
+
+
+  app.get('/submit', connectEnsureLogin.ensureLoggedIn(), (req, res) => {
+    res.render('submit')
   });
+  app.post('/submit', (req, res)=>{
+      submittedSecret = req.body.secret
+      console.log(req.user._id)
+
+      User.findById(req.user._id, (err, foundUser)=>{
+          if(err){
+              console.log(err)
+          } else{
+              if(foundUser){
+                  foundUser.secret = submittedSecret
+                  foundUser.save(()=>{
+                      res.redirect('/secrets')
+                  })
+              }
+          }
+      })
+  })
 
 
 app.route('/login')
